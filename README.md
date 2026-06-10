@@ -1,0 +1,142 @@
+# ExcelChartExporter — ODC External Library
+
+An [OutSystems Developer Cloud (ODC) external library](https://success.outsystems.com/documentation/outsystems_developer_cloud/building_apps/extend_your_apps_with_external_logic/)
+that generates Excel (`.xlsx`) files containing a data table **and a native Excel chart**
+built from the input data.
+
+It is built on [NPOI](https://github.com/nissl-lab/npoi) **2.7.4**, which is
+**free under the Apache 2.0 license** (no commercial licensing required — unlike
+EPPlus 5+, Syncfusion, or NPOI 2.8.0+ which introduced the OSMF maintenance-fee EULA).
+
+## Supported chart types
+
+| Chart type | Notes |
+|------------|-------|
+| `Column`   | Vertical bars |
+| `Bar`      | Horizontal bars |
+| `Line`     | One line per series |
+| `Pie`      | Uses the **first series only** (Excel pie charts plot a single series) |
+| `Doughnut` | Also accepted as `Donut`. Additional series render as concentric rings |
+| `Area`     | One area per series |
+| `Scatter`  | Category labels that parse as numbers are used as X values; otherwise the 1-based index is used |
+| `Heatmap`  | Excel has no heatmap chart type: rendered the standard Excel way, as the data grid with a red → yellow → green 3-color scale conditional format |
+| `Gantt`    | Also accepted as `GanttChart`. Classic Excel Gantt: a stacked horizontal bar chart. Categories are the task names; the **first series holds the start offsets** (rendered invisible) and the remaining series hold the durations. Requires at least two series |
+
+Chart type names are case-insensitive and tolerate spaces/hyphens (e.g.
+`"gantt chart"`, `"heat-map"`).
+
+## Exposed server actions
+
+### `ExportChartToExcel`
+
+Writes the data as a table in a worksheet and plots a chart of the requested
+type next to it. Returns the `.xlsx` file as **Binary Data** — ready to feed
+into a Download node, attach to an email, or store.
+
+| Parameter | Type | Mandatory | Description |
+|-----------|------|-----------|-------------|
+| `ChartType` | Text | Yes | One of `Column`, `Bar`, `Line`, `Pie`, `Doughnut`, `Area`, `Scatter`, `Heatmap`, `Gantt` (case-insensitive) |
+| `Categories` | List of Text | Yes | Category labels (X axis) |
+| `Series` | List of `ChartSeries` | Yes | The data series to plot |
+| `ChartTitle` | Text | No | Title shown above the chart |
+| `SheetName` | Text | No | Worksheet name (default `Chart Data`; invalid characters are replaced) |
+| `CategoryAxisTitle` | Text | No | X-axis title (ignored for Pie) |
+| `ValueAxisTitle` | Text | No | Y-axis title (ignored for Pie) |
+| `ShowLegend` | Boolean | No | Show the chart legend (default `True`) |
+
+Returns: `ExcelFile` (Binary Data).
+
+### `GetSupportedChartTypes`
+
+Returns the list of accepted chart type names — useful to populate a dropdown.
+
+### `ChartSeries` structure
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `Name` | Text | Series name (legend entry / column header) |
+| `Values` | List of Decimal | One value per category |
+
+Every series must have exactly one value per category; the library validates
+this and raises a descriptive error otherwise.
+
+## Using it in ODC
+
+1. Build the upload package:
+   ```bash
+   ./scripts/package.sh
+   ```
+   This produces `artifacts/ExcelChartExporter.zip`. (The GitHub Actions
+   workflow also publishes this zip as a build artifact on every push.)
+2. In the **ODC Portal**, go to **External logic** and upload the zip.
+3. In **ODC Studio**, add the `ExcelChartExporter` server actions to your app
+   (Add public elements → search for `ExportChartToExcel`).
+4. Build the `Categories` and `Series` lists from your data (e.g. an
+   aggregate result), call `ExportChartToExcel`, and pass the returned binary
+   to a **Download** node with a `.xlsx` filename and MIME type
+   `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+
+## Example
+
+For categories `["Q1","Q2","Q3","Q4"]` and two series (`Revenue`, `Costs`),
+calling `ExportChartToExcel("Column", ...)` produces a worksheet like:
+
+| Quarter | Revenue | Costs |
+|---------|---------|-------|
+| Q1 | 120.5 | 80 |
+| Q2 | 150 | 95.5 |
+| Q3 | 90.25 | 70 |
+| Q4 | 200 | 110 |
+
+with a native, editable Excel column chart plotted beside the table. Because
+the chart references the cells (not pasted as an image), users can restyle or
+edit it in Excel.
+
+## Development
+
+```bash
+dotnet test            # run the test suite
+./scripts/package.sh   # produce the ODC upload zip
+```
+
+Requirements: .NET 8 SDK.
+
+### Local test app
+
+`samples/ExcelChartLibrary.TestApp` is an ASP.NET Core harness that exercises
+the exact same `ExcelChartExporter` class the ODC external library exposes:
+
+```bash
+dotnet run --project samples/ExcelChartLibrary.TestApp
+```
+
+Then open the printed URL (e.g. `http://localhost:5000`) for an interactive
+page where you can pick the chart type, enter categories/series, and download
+the generated `.xlsx`. It also exposes the API directly:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/chart-types` | Supported chart type names |
+| `GET /api/sample/{chartType}` | One-click download with built-in demo data (e.g. `/api/sample/Doughnut`) |
+| `POST /api/export` | JSON body mirroring the ODC action's inputs; returns the `.xlsx` |
+
+Example:
+
+```bash
+curl -X POST http://localhost:5000/api/export \
+  -H "Content-Type: application/json" \
+  -d '{"chartType":"Column","chartTitle":"Quarterly","categories":["Q1","Q2"],
+       "series":[{"name":"Revenue","values":[120.5,150]}]}' \
+  -o Quarterly.xlsx
+```
+
+### Why NPOI?
+
+| Library | Charts | License / cost |
+|---------|--------|----------------|
+| **NPOI 2.7.4** ✅ | Column, Bar, Line, Pie, Doughnut, Area, Scatter (+ Heatmap & Gantt via OOXML/conditional formatting) | Apache 2.0 — free, incl. commercial use |
+| NPOI ≥ 2.8.0 | Same + more | Requires OSMF maintenance-fee EULA for commercial use |
+| EPPlus ≥ 5 | Full | Polyform Noncommercial — paid license for commercial use |
+| ClosedXML | ❌ cannot create charts | MIT |
+| Open XML SDK | Possible but very low-level | MIT |
+| Syncfusion | Full | Commercial (excluded) |

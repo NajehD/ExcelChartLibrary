@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ExcelChartExporter — Test Harness</title>
+<style>
+  :root { font-family: system-ui, sans-serif; }
+  body { max-width: 920px; margin: 2rem auto; padding: 0 1rem; color: #1c2733; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.05rem; margin-top: 1.8rem; }
+  fieldset { border: 1px solid #d4dbe3; border-radius: 8px; margin-bottom: 1rem; }
+  label { display: block; font-size: .85rem; font-weight: 600; margin: .6rem 0 .15rem; }
+  input[type=text], select { width: 100%; box-sizing: border-box; padding: .45rem; border: 1px solid #c4cdd8; border-radius: 6px; font-size: .9rem; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+  .series-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: .5rem; align-items: end; margin-bottom: .4rem; }
+  button { padding: .5rem 1rem; border: none; border-radius: 6px; background: #0b6bcb; color: #fff; font-size: .9rem; cursor: pointer; }
+  button.secondary { background: #5a6b7d; }
+  button.danger { background: #b3443f; padding: .45rem .6rem; }
+  #error { color: #b3443f; font-weight: 600; white-space: pre-wrap; margin-top: .8rem; }
+  .samples a { display: inline-block; margin: .2rem .4rem .2rem 0; padding: .35rem .7rem; background: #eef3f8; border-radius: 6px; text-decoration: none; color: #0b6bcb; font-size: .85rem; }
+  .hint { font-size: .8rem; color: #5a6b7d; font-weight: 400; }
+</style>
+</head>
+<body>
+<h1>ExcelChartExporter — Test Harness</h1>
+<p>Exercises the exact same <code>ExcelChartExporter</code> class that the ODC external library exposes.</p>
+
+<h2>One-click samples (built-in demo data)</h2>
+<div class="samples" id="samples"></div>
+
+<h2>Custom export</h2>
+<form id="form">
+  <fieldset>
+    <legend>Chart</legend>
+    <div class="row">
+      <div>
+        <label for="chartType">Chart type</label>
+        <select id="chartType"></select>
+      </div>
+      <div>
+        <label for="chartTitle">Chart title</label>
+        <input type="text" id="chartTitle" value="My chart">
+      </div>
+      <div>
+        <label for="sheetName">Sheet name</label>
+        <input type="text" id="sheetName" value="Chart Data">
+      </div>
+      <div>
+        <label for="showLegend">Legend</label>
+        <select id="showLegend"><option value="true">Show</option><option value="false">Hide</option></select>
+      </div>
+      <div>
+        <label for="catAxis">Category axis title <span class="hint">(ignored for Pie/Doughnut)</span></label>
+        <input type="text" id="catAxis" value="Quarter">
+      </div>
+      <div>
+        <label for="valAxis">Value axis title</label>
+        <input type="text" id="valAxis" value="Amount">
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Data</legend>
+    <label for="categories">Categories <span class="hint">(comma separated; task names for Gantt)</span></label>
+    <input type="text" id="categories" value="Q1, Q2, Q3, Q4">
+    <label>Series <span class="hint">(values comma separated, one per category; for Gantt: first series = start offsets, then durations)</span></label>
+    <div id="seriesRows"></div>
+    <button type="button" class="secondary" id="addSeries">+ Add series</button>
+  </fieldset>
+
+  <button type="submit">Generate &amp; download .xlsx</button>
+  <div id="error"></div>
+</form>
+
+<script>
+const seriesRows = document.getElementById('seriesRows');
+
+function addSeriesRow(name, values) {
+  const row = document.createElement('div');
+  row.className = 'series-row';
+  row.innerHTML = `
+    <div><label>Name</label><input type="text" class="s-name"></div>
+    <div><label>Values</label><input type="text" class="s-values"></div>
+    <button type="button" class="danger" title="Remove series">✕</button>`;
+  row.querySelector('.s-name').value = name;
+  row.querySelector('.s-values').value = values;
+  row.querySelector('button').onclick = () => row.remove();
+  seriesRows.appendChild(row);
+}
+
+addSeriesRow('Revenue', '120.5, 150, 90.25, 200');
+addSeriesRow('Costs', '80, 95.5, 70, 110');
+document.getElementById('addSeries').onclick = () => addSeriesRow('', '');
+
+fetch('/api/chart-types').then(r => r.json()).then(types => {
+  const select = document.getElementById('chartType');
+  const samples = document.getElementById('samples');
+  for (const t of types) {
+    select.add(new Option(t, t));
+    const a = document.createElement('a');
+    a.href = '/api/sample/' + encodeURIComponent(t);
+    a.textContent = t + '.xlsx';
+    samples.appendChild(a);
+  }
+});
+
+document.getElementById('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const errorBox = document.getElementById('error');
+  errorBox.textContent = '';
+
+  const body = {
+    chartType: document.getElementById('chartType').value,
+    chartTitle: document.getElementById('chartTitle').value,
+    sheetName: document.getElementById('sheetName').value,
+    categoryAxisTitle: document.getElementById('catAxis').value,
+    valueAxisTitle: document.getElementById('valAxis').value,
+    showLegend: document.getElementById('showLegend').value === 'true',
+    categories: document.getElementById('categories').value.split(',').map(s => s.trim()).filter(s => s),
+    series: [...seriesRows.querySelectorAll('.series-row')].map(row => ({
+      name: row.querySelector('.s-name').value,
+      values: row.querySelector('.s-values').value.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v))
+    }))
+  };
+
+  const response = await fetch('/api/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    errorBox.textContent = detail?.error ?? `Request failed (${response.status})`;
+    return;
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = (body.chartTitle || body.chartType) + '.xlsx';
+  link.click();
+  URL.revokeObjectURL(url);
+};
+</script>
+</body>
+</html>
