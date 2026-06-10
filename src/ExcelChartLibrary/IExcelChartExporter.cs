@@ -9,7 +9,7 @@ namespace ExcelChartLibrary;
 /// </summary>
 [OSInterface(
     Name = "ExcelChartExporter",
-    Description = "Generates Excel (.xlsx) files containing a data table and a native Excel chart (Column, Bar, Line, Pie, Area or Scatter) built from the input data. Powered by NPOI (Apache 2.0).")]
+    Description = "Generates Excel (.xlsx) files containing a data table and a native Excel chart (Column, Bar, Line, Pie, Doughnut, Area, Scatter, Heatmap or Gantt) built from the input data. Powered by NPOI (Apache 2.0).")]
 public interface IExcelChartExporter
 {
     /// <summary>
@@ -22,11 +22,11 @@ public interface IExcelChartExporter
         ReturnDescription = "The generated .xlsx file as binary data.",
         ReturnType = OSDataType.BinaryData)]
     byte[] ExportChartToExcel(
-        [OSParameter(Description = "Chart type. One of: Column, Bar, Line, Pie, Area, Scatter (case-insensitive).")]
+        [OSParameter(Description = "Chart type. One of: Column, Bar, Line, Pie, Doughnut (or Donut), Area, Scatter, Heatmap, Gantt (case-insensitive).")]
         string chartType,
-        [OSParameter(Description = "Category labels (X axis). Each series must have one value per category.")]
+        [OSParameter(Description = "Category labels (X axis). For Gantt charts these are the task names. Each series must have one value per category.")]
         List<string> categories,
-        [OSParameter(Description = "Data series to plot. Pie charts use only the first series.")]
+        [OSParameter(Description = "Data series to plot. Pie charts use only the first series; Doughnut charts render extra series as concentric rings; Gantt charts use the first series as hidden start offsets and the rest as durations.")]
         List<ChartSeries> series,
         [OSParameter(Description = "Title displayed above the chart. Optional.")]
         string chartTitle = "",

@@ -16,8 +16,14 @@ EPPlus 5+, Syncfusion, or NPOI 2.8.0+ which introduced the OSMF maintenance-fee 
 | `Bar`      | Horizontal bars |
 | `Line`     | One line per series |
 | `Pie`      | Uses the **first series only** (Excel pie charts plot a single series) |
+| `Doughnut` | Also accepted as `Donut`. Additional series render as concentric rings |
 | `Area`     | One area per series |
 | `Scatter`  | Category labels that parse as numbers are used as X values; otherwise the 1-based index is used |
+| `Heatmap`  | Excel has no heatmap chart type: rendered the standard Excel way, as the data grid with a red → yellow → green 3-color scale conditional format |
+| `Gantt`    | Also accepted as `GanttChart`. Classic Excel Gantt: a stacked horizontal bar chart. Categories are the task names; the **first series holds the start offsets** (rendered invisible) and the remaining series hold the durations. Requires at least two series |
+
+Chart type names are case-insensitive and tolerate spaces/hyphens (e.g.
+`"gantt chart"`, `"heat-map"`).
 
 ## Exposed server actions
 
@@ -29,7 +35,7 @@ into a Download node, attach to an email, or store.
 
 | Parameter | Type | Mandatory | Description |
 |-----------|------|-----------|-------------|
-| `ChartType` | Text | Yes | One of `Column`, `Bar`, `Line`, `Pie`, `Area`, `Scatter` (case-insensitive) |
+| `ChartType` | Text | Yes | One of `Column`, `Bar`, `Line`, `Pie`, `Doughnut`, `Area`, `Scatter`, `Heatmap`, `Gantt` (case-insensitive) |
 | `Categories` | List of Text | Yes | Category labels (X axis) |
 | `Series` | List of `ChartSeries` | Yes | The data series to plot |
 | `ChartTitle` | Text | No | Title shown above the chart |
@@ -99,7 +105,7 @@ Requirements: .NET 8 SDK.
 
 | Library | Charts | License / cost |
 |---------|--------|----------------|
-| **NPOI 2.7.4** ✅ | Column, Bar, Line, Pie, Area, Scatter | Apache 2.0 — free, incl. commercial use |
+| **NPOI 2.7.4** ✅ | Column, Bar, Line, Pie, Doughnut, Area, Scatter (+ Heatmap & Gantt via OOXML/conditional formatting) | Apache 2.0 — free, incl. commercial use |
 | NPOI ≥ 2.8.0 | Same + more | Requires OSMF maintenance-fee EULA for commercial use |
 | EPPlus ≥ 5 | Full | Polyform Noncommercial — paid license for commercial use |
 | ClosedXML | ❌ cannot create charts | MIT |

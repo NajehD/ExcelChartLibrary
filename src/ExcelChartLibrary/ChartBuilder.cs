@@ -13,8 +13,11 @@ internal enum ChartKind
     Bar,
     Line,
     Pie,
+    Doughnut,
     Area,
-    Scatter
+    Scatter,
+    Heatmap,
+    Gantt
 }
 
 /// <summary>
@@ -24,7 +27,7 @@ internal enum ChartKind
 internal static class ChartBuilder
 {
     public static readonly string[] SupportedChartTypes =
-        ["Column", "Bar", "Line", "Pie", "Area", "Scatter"];
+        ["Column", "Bar", "Line", "Pie", "Doughnut", "Area", "Scatter", "Heatmap", "Gantt"];
 
     private const int ChartWidthInColumns = 9;
     private const int ChartHeightInRows = 22;
@@ -32,7 +35,22 @@ internal static class ChartBuilder
 
     public static ChartKind ParseChartType(string chartType)
     {
-        if (Enum.TryParse<ChartKind>(chartType?.Trim(), ignoreCase: true, out var kind))
+        // Accept common synonyms and ignore spaces/hyphens/underscores,
+        // e.g. "donut", "Gantt Chart", "heat-map".
+        var normalized = (chartType ?? string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("-", string.Empty)
+            .Replace("_", string.Empty);
+
+        normalized = normalized.ToLowerInvariant() switch
+        {
+            "donut" or "donutchart" or "doughnutchart" => "Doughnut",
+            "ganttchart" => "Gantt",
+            "heatmapchart" => "Heatmap",
+            _ => normalized
+        };
+
+        if (Enum.TryParse<ChartKind>(normalized, ignoreCase: true, out var kind))
             return kind;
 
         throw new ArgumentException(
@@ -53,10 +71,16 @@ internal static class ChartBuilder
         using var workbook = new XSSFWorkbook();
         var sheet = (XSSFSheet)workbook.CreateSheet(SanitizeSheetName(sheetName));
 
-        WriteDataTable(workbook, sheet, kind, categories, series, categoryAxisTitle);
-
-        var chart = CreateChartFrame(sheet, series.Count, chartTitle, showLegend);
-        PlotChart(chart, sheet, kind, categories.Count, series.Count, categoryAxisTitle, valueAxisTitle);
+        if (kind == ChartKind.Heatmap)
+        {
+            BuildHeatmap(workbook, sheet, categories, series, chartTitle, categoryAxisTitle);
+        }
+        else
+        {
+            WriteDataTable(workbook, sheet, kind, categories, series, categoryAxisTitle, startRow: 0);
+            var chart = CreateChartFrame(sheet, series.Count, chartTitle, showLegend);
+            PlotChart(chart, sheet, kind, categories.Count, series.Count, categoryAxisTitle, valueAxisTitle);
+        }
 
         using var stream = new MemoryStream();
         workbook.Write(stream, leaveOpen: true);
@@ -74,14 +98,15 @@ internal static class ChartBuilder
         ChartKind kind,
         List<string> categories,
         List<ChartSeries> series,
-        string categoryAxisTitle)
+        string categoryAxisTitle,
+        int startRow)
     {
         var headerStyle = workbook.CreateCellStyle();
         var headerFont = workbook.CreateFont();
         headerFont.IsBold = true;
         headerStyle.SetFont(headerFont);
 
-        var headerRow = sheet.CreateRow(0);
+        var headerRow = sheet.CreateRow(startRow);
         var categoryHeader = headerRow.CreateCell(0);
         categoryHeader.SetCellValue(string.IsNullOrWhiteSpace(categoryAxisTitle) ? "Category" : categoryAxisTitle);
         categoryHeader.CellStyle = headerStyle;
@@ -97,7 +122,7 @@ internal static class ChartBuilder
 
         for (var r = 0; r < categories.Count; r++)
         {
-            var row = sheet.CreateRow(r + 1);
+            var row = sheet.CreateRow(startRow + r + 1);
             var categoryCell = row.CreateCell(0);
             if (numericCategories != null)
                 categoryCell.SetCellValue(numericCategories[r]);
@@ -144,15 +169,23 @@ internal static class ChartBuilder
         var lastDataRow = categoryCount;
         var categoryRange = new CellRangeAddress(firstDataRow, lastDataRow, 0, 0);
 
-        if (kind == ChartKind.Pie)
+        if (kind is ChartKind.Pie or ChartKind.Doughnut)
         {
-            // Excel pie charts plot a single series.
+            // Excel pie charts plot a single series; doughnut charts render
+            // each additional series as a concentric ring.
             var pieData = chart.ChartDataFactory.CreatePieChartData<string, double>();
             var categorySource = DataSources.FromStringCellRange(sheet, categoryRange);
-            var valueSource = DataSources.FromNumericCellRange(sheet, new CellRangeAddress(firstDataRow, lastDataRow, 1, 1));
-            var pieSeries = pieData.AddSeries(categorySource, valueSource);
-            pieSeries.SetTitle(new CellReference(0, 1));
+            var pieSeriesCount = kind == ChartKind.Pie ? 1 : seriesCount;
+            for (var s = 0; s < pieSeriesCount; s++)
+            {
+                var valueSource = DataSources.FromNumericCellRange(sheet, new CellRangeAddress(firstDataRow, lastDataRow, s + 1, s + 1));
+                var pieSeries = pieData.AddSeries(categorySource, valueSource);
+                pieSeries.SetTitle(HeaderCellReference(sheet, s));
+            }
             chart.Plot(pieData);
+
+            if (kind == ChartKind.Doughnut)
+                ConvertPieToDoughnut(chart);
             return;
         }
 
@@ -170,10 +203,13 @@ internal static class ChartBuilder
                 break;
             }
             case ChartKind.Bar:
+            case ChartKind.Gantt:
             {
                 var data = chart.ChartDataFactory.CreateBarChartData<string, double>();
                 AddCategorySeries(data.AddSeries, sheet, categoryRange, firstDataRow, lastDataRow, seriesCount);
                 chart.Plot(data, bottomAxis, leftAxis);
+                if (kind == ChartKind.Gantt)
+                    ApplyGanttFormatting(chart);
                 break;
             }
             case ChartKind.Line:
@@ -198,7 +234,7 @@ internal static class ChartBuilder
                 {
                     var ySource = DataSources.FromNumericCellRange(sheet, new CellRangeAddress(firstDataRow, lastDataRow, s + 1, s + 1));
                     var scatterSeries = data.AddSeries(xSource, ySource);
-                    scatterSeries.SetTitle(new CellReference(0, s + 1));
+                    scatterSeries.SetTitle(HeaderCellReference(sheet, s));
                 }
                 chart.Plot(data, bottomAxis, leftAxis);
                 break;
@@ -208,6 +244,124 @@ internal static class ChartBuilder
         }
 
         SetAxisTitles(chart, categoryAxisTitle, valueAxisTitle);
+    }
+
+    /// <summary>
+    /// NPOI has no doughnut chart factory, so the plotted pie chart is
+    /// rewritten as a doughnutChart element in the underlying OOXML part.
+    /// </summary>
+    private static void ConvertPieToDoughnut(XSSFChart chart)
+    {
+        var plotArea = chart.GetCTChart().plotArea;
+        var pie = plotArea.pieChart[0];
+
+        var doughnut = new CT_DoughnutChart
+        {
+            varyColors = pie.varyColors,
+            ser = pie.ser,
+            holeSize = new CT_HoleSize { val = 50 }
+        };
+
+        plotArea.doughnutChart ??= [];
+        plotArea.doughnutChart.Add(doughnut);
+        plotArea.pieChart.Clear();
+    }
+
+    /// <summary>
+    /// Turns the plotted horizontal bar chart into the classic Excel Gantt:
+    /// stacked bars where the first series (start offsets) is invisible, the
+    /// remaining series are the phase durations, and tasks read top-down.
+    /// </summary>
+    private static void ApplyGanttFormatting(XSSFChart chart)
+    {
+        var ctChart = chart.GetCTChart();
+        var bar = ctChart.plotArea.barChart[0];
+
+        bar.grouping ??= bar.AddNewGrouping();
+        bar.grouping.val = ST_BarGrouping.stacked;
+        bar.overlap = new CT_Overlap { val = 100 };
+
+        bar.ser[0].spPr = new CT_ShapeProperties { noFill = new NPOI.OpenXmlFormats.Dml.CT_NoFillProperties() };
+
+        // First task at the top, like a project plan.
+        var scaling = ctChart.plotArea.catAx[0].scaling;
+        scaling.orientation ??= scaling.AddNewOrientation();
+        scaling.orientation.val = ST_Orientation.maxMin;
+
+        // Note: the offset series still gets a legend entry. NPOI 2.7.4 cannot
+        // serialize <c:legendEntry><c:delete/> correctly, so hiding it would
+        // produce invalid chart XML.
+    }
+
+    /// <summary>
+    /// Excel has no native heatmap chart type: the standard representation is
+    /// the data grid itself with a 3-color scale conditional format (red →
+    /// yellow → green), which is what Excel produces for a heatmap as well.
+    /// </summary>
+    private static void BuildHeatmap(
+        XSSFWorkbook workbook,
+        XSSFSheet sheet,
+        List<string> categories,
+        List<ChartSeries> series,
+        string chartTitle,
+        string categoryAxisTitle)
+    {
+        var startRow = 0;
+        if (!string.IsNullOrWhiteSpace(chartTitle))
+        {
+            var titleFont = workbook.CreateFont();
+            titleFont.IsBold = true;
+            titleFont.FontHeightInPoints = 14;
+            var titleStyle = workbook.CreateCellStyle();
+            titleStyle.SetFont(titleFont);
+
+            var titleCell = sheet.CreateRow(0).CreateCell(0);
+            titleCell.SetCellValue(chartTitle);
+            titleCell.CellStyle = titleStyle;
+            if (series.Count > 0)
+                sheet.AddMergedRegion(new CellRangeAddress(0, 0, 0, series.Count));
+            startRow = 1;
+        }
+
+        WriteDataTable(workbook, sheet, ChartKind.Heatmap, categories, series, categoryAxisTitle, startRow);
+
+        var dataRegion = new CellRangeAddress(startRow + 1, startRow + categories.Count, 1, series.Count);
+        var formatting = sheet.SheetConditionalFormatting;
+        var rule = formatting.CreateConditionalFormattingColorScaleRule();
+        var colorScale = rule.ColorScaleFormatting;
+
+        var low = colorScale.CreateThreshold();
+        low.RangeType = RangeType.MIN;
+        var mid = colorScale.CreateThreshold();
+        mid.RangeType = RangeType.PERCENTILE;
+        mid.Value = 50;
+        var high = colorScale.CreateThreshold();
+        high.RangeType = RangeType.MAX;
+        colorScale.Thresholds = [low, mid, high];
+
+        // Excel's default red → yellow → green scale.
+        colorScale.Colors =
+        [
+            CreateColor("FFF8696B"),
+            CreateColor("FFFFEB84"),
+            CreateColor("FF63BE7B")
+        ];
+
+        formatting.AddConditionalFormatting([dataRegion], rule);
+
+        // NPOI stamps dxfId="0" on the rule, but color scale rules carry no
+        // differential style and the workbook defines none, so strict readers
+        // reject the reference. Remove it.
+        foreach (var conditionalFormatting in sheet.GetCTWorksheet().conditionalFormatting)
+        foreach (var cfRule in conditionalFormatting.cfRule)
+            cfRule.dxfIdSpecified = false;
+    }
+
+    private static XSSFColor CreateColor(string argbHex)
+    {
+        var color = new XSSFColor();
+        color.ARGBHex = argbHex;
+        return color;
     }
 
     private delegate IChartSeries AddSeriesFunc(IChartDataSource<string> categories, IChartDataSource<double> values);
@@ -225,9 +379,17 @@ internal static class ChartBuilder
         {
             var valueSource = DataSources.FromNumericCellRange(sheet, new CellRangeAddress(firstDataRow, lastDataRow, s + 1, s + 1));
             var chartSeries = addSeries(categorySource, valueSource);
-            chartSeries.SetTitle(new CellReference(0, s + 1));
+            chartSeries.SetTitle(HeaderCellReference(sheet, s));
         }
     }
+
+    /// <summary>
+    /// Fully qualified reference to a series header cell (e.g. 'Chart
+    /// Data'!$B$1). A bare reference like "B1" cannot be resolved by Excel
+    /// from within the chart part.
+    /// </summary>
+    private static CellReference HeaderCellReference(XSSFSheet sheet, int seriesIndex) =>
+        new(sheet.SheetName, 0, seriesIndex + 1, true, true);
 
     /// <summary>
     /// NPOI's classic chart API has no axis title support, so the titles are

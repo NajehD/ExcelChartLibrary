@@ -24,8 +24,10 @@ public class ExcelChartExporterTests
     [InlineData("Bar", "barChart")]
     [InlineData("Line", "lineChart")]
     [InlineData("Pie", "pieChart")]
+    [InlineData("Doughnut", "doughnutChart")]
     [InlineData("Area", "areaChart")]
     [InlineData("Scatter", "scatterChart")]
+    [InlineData("Gantt", "barChart")]
     public void ExportChartToExcel_GeneratesWorkbookWithChart(string chartType, string expectedChartElement)
     {
         var bytes = _exporter.ExportChartToExcel(
@@ -55,6 +57,88 @@ public class ExcelChartExporterTests
     {
         var bytes = _exporter.ExportChartToExcel("pIe", Categories, Series);
         Assert.Contains("<c:pieChart>", ReadChartXml(bytes));
+    }
+
+    [Theory]
+    [InlineData("Donut", "doughnutChart")]
+    [InlineData("donut chart", "doughnutChart")]
+    [InlineData("GanttChart", "barChart")]
+    [InlineData("Gantt Chart", "barChart")]
+    public void ExportChartToExcel_AcceptsChartTypeSynonyms(string chartType, string expectedChartElement)
+    {
+        var bytes = _exporter.ExportChartToExcel(chartType, Categories, Series);
+        Assert.Contains($"<c:{expectedChartElement}>", ReadChartXml(bytes));
+    }
+
+    [Fact]
+    public void ExportChartToExcel_Doughnut_HasHoleAndAllSeriesAsRings()
+    {
+        var bytes = _exporter.ExportChartToExcel("Doughnut", Categories, Series);
+        var chartXml = ReadChartXml(bytes);
+        Assert.Contains("<c:holeSize", chartXml);
+        Assert.DoesNotContain("<c:pieChart>", chartXml);
+        // Both series present as rings, with fully qualified name references.
+        Assert.Contains("$B$1", chartXml);
+        Assert.Contains("$C$1", chartXml);
+        Assert.Equal(2, chartXml.Split("<c:ser>").Length - 1);
+    }
+
+    [Fact]
+    public void ExportChartToExcel_Gantt_IsStackedWithHiddenFirstSeries()
+    {
+        var bytes = _exporter.ExportChartToExcel("Gantt",
+            ["Design", "Build", "Test"],
+            [
+                new ChartSeries { Name = "Start", Values = [0m, 5m, 12m] },
+                new ChartSeries { Name = "Duration", Values = [5m, 7m, 4m] }
+            ]);
+        var chartXml = ReadChartXml(bytes);
+        Assert.Contains("grouping val=\"stacked\"", chartXml);
+        Assert.Contains("overlap val=\"100\"", chartXml);
+        Assert.Contains("<a:noFill", chartXml);
+        Assert.Contains("orientation val=\"maxMin\"", chartXml);
+        Assert.Contains("barDir val=\"bar\"", chartXml);
+    }
+
+    [Fact]
+    public void ExportChartToExcel_Gantt_RequiresTwoSeries()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            _exporter.ExportChartToExcel("Gantt", Categories,
+                [new ChartSeries { Name = "Only", Values = [1m, 2m, 3m, 4m] }]));
+        Assert.Contains("at least two series", ex.Message);
+    }
+
+    [Fact]
+    public void ExportChartToExcel_Heatmap_AppliesColorScaleInsteadOfChart()
+    {
+        var bytes = _exporter.ExportChartToExcel("Heatmap", Categories, Series,
+            chartTitle: "Intensity", sheetName: "Report");
+
+        using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
+        Assert.DoesNotContain(archive.Entries, e => e.FullName.StartsWith("xl/charts/"));
+        using var reader = new StreamReader(archive.GetEntry("xl/worksheets/sheet1.xml")!.Open(), Encoding.UTF8);
+        var sheetXml = reader.ReadToEnd();
+        Assert.Contains("colorScale", sheetXml);
+        Assert.Contains("FFF8696B", sheetXml);
+
+        // Title row shifts the table down by one row.
+        using var stream = new MemoryStream(bytes);
+        var workbook = new XSSFWorkbook(stream);
+        var sheet = workbook.GetSheet("Report");
+        Assert.Equal("Intensity", sheet.GetRow(0).GetCell(0).StringCellValue);
+        Assert.Equal("Revenue", sheet.GetRow(1).GetCell(1).StringCellValue);
+        Assert.Equal(120.5, sheet.GetRow(2).GetCell(1).NumericCellValue, 3);
+    }
+
+    [Fact]
+    public void ExportChartToExcel_Heatmap_WithoutTitleStartsAtFirstRow()
+    {
+        var bytes = _exporter.ExportChartToExcel("Heatmap", Categories, Series, sheetName: "Report");
+        using var stream = new MemoryStream(bytes);
+        var workbook = new XSSFWorkbook(stream);
+        var sheet = workbook.GetSheet("Report");
+        Assert.Equal("Revenue", sheet.GetRow(0).GetCell(1).StringCellValue);
     }
 
     [Fact]
@@ -109,7 +193,7 @@ public class ExcelChartExporterTests
     public void GetSupportedChartTypes_ReturnsAllTypes()
     {
         var types = _exporter.GetSupportedChartTypes();
-        Assert.Equal(["Column", "Bar", "Line", "Pie", "Area", "Scatter"], types);
+        Assert.Equal(["Column", "Bar", "Line", "Pie", "Doughnut", "Area", "Scatter", "Heatmap", "Gantt"], types);
     }
 
     private static string ReadChartXml(byte[] xlsxBytes)

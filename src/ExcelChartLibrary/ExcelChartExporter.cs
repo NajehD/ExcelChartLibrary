@@ -18,7 +18,7 @@ public class ExcelChartExporter : IExcelChartExporter
         bool showLegend = true)
     {
         var kind = ChartBuilder.ParseChartType(chartType);
-        Validate(categories, series);
+        Validate(kind, categories, series);
 
         return ChartBuilder.Build(
             kind,
@@ -33,13 +33,19 @@ public class ExcelChartExporter : IExcelChartExporter
 
     public List<string> GetSupportedChartTypes() => ChartBuilder.SupportedChartTypes.ToList();
 
-    private static void Validate(List<string> categories, List<ChartSeries> series)
+    private static void Validate(ChartKind kind, List<string> categories, List<ChartSeries> series)
     {
         if (categories == null || categories.Count == 0)
             throw new ArgumentException("At least one category is required.", nameof(categories));
 
         if (series == null || series.Count == 0)
             throw new ArgumentException("At least one data series is required.", nameof(series));
+
+        if (kind == ChartKind.Gantt && series.Count < 2)
+            throw new ArgumentException(
+                "Gantt charts require at least two series: the first holds the start offsets " +
+                "(rendered invisible) and the following series hold the durations.",
+                nameof(series));
 
         for (var i = 0; i < series.Count; i++)
         {
