@@ -101,6 +101,35 @@ dotnet test            # run the test suite
 
 Requirements: .NET 8 SDK.
 
+### Local test app
+
+`samples/ExcelChartLibrary.TestApp` is an ASP.NET Core harness that exercises
+the exact same `ExcelChartExporter` class the ODC external library exposes:
+
+```bash
+dotnet run --project samples/ExcelChartLibrary.TestApp
+```
+
+Then open the printed URL (e.g. `http://localhost:5000`) for an interactive
+page where you can pick the chart type, enter categories/series, and download
+the generated `.xlsx`. It also exposes the API directly:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/chart-types` | Supported chart type names |
+| `GET /api/sample/{chartType}` | One-click download with built-in demo data (e.g. `/api/sample/Doughnut`) |
+| `POST /api/export` | JSON body mirroring the ODC action's inputs; returns the `.xlsx` |
+
+Example:
+
+```bash
+curl -X POST http://localhost:5000/api/export \
+  -H "Content-Type: application/json" \
+  -d '{"chartType":"Column","chartTitle":"Quarterly","categories":["Q1","Q2"],
+       "series":[{"name":"Revenue","values":[120.5,150]}]}' \
+  -o Quarterly.xlsx
+```
+
 ### Why NPOI?
 
 | Library | Charts | License / cost |
