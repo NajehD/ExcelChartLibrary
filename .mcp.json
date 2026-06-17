@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "outsystems": {
+      "type": "http",
+      "url": "https://ten-dev.outsystems.app/mcp",
+      "oauth": {
+        "clientId": "service_studio",
+        "callbackPort": 7890
+      }
+    }
+  }
+}

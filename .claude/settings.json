@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "outsystems": {
+      "source": {
+        "source": "github",
+        "repo": "OutSystems/outsystems-mcp"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "outsystems@outsystems": true
+  }
+}
