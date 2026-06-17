@@ -1,8 +1,3 @@
 {
-  "mcpServers": {
-    "outsystems": {
-      "type": "http",
-      "url": "https://ten.outsystems.dev/mcp"
-    }
-  }
+  "mcpServers": {}
 }
