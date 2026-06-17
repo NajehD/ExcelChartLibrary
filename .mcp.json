@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "outsystems-odc": {
+      "type": "http",
+      "url": "https://ten.outsystems.dev/mcp"
+    }
+  }
+}
